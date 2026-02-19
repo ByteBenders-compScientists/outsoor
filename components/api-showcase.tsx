@@ -301,7 +301,7 @@ export function ApiShowcase() {
             </Link>
           </div>
 
-          {/* Right — dark block */}
+          {/* Right  */}
           <div
             className="p-10 flex flex-col justify-between gap-8"
             style={{ background: "var(--color-surface-2)" }}
