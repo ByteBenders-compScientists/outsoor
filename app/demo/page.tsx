@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation"
 import { useTheme } from "@/contexts/themeContext"
 import { Footer } from "@/components/footer"
 import { ArrowLeft, ArrowRight, Check, Calendar, Users, Zap, Shield } from "lucide-react"
+import { PageTopBar } from "@/components/page-top-bar"
 
 const perks = [
   { icon: Calendar, text: "30-min live walkthrough with an engineer" },
@@ -46,20 +47,8 @@ export default function DemoPage() {
     <div className="min-h-screen" style={{ background: "var(--color-bg)" }}>
 
       {/* Back bar */}
-      <div style={{ borderBottom: "1px solid var(--color-border)" }}>
-        <div className="max-w-7xl mx-auto px-6 py-4">
-          <Link
-            href="/"
-            className="inline-flex items-center gap-2 text-sm transition-colors duration-150"
-            style={{ color: "var(--color-text-muted)" }}
-            onMouseEnter={(e) => (e.currentTarget.style.color = "var(--color-primary)")}
-            onMouseLeave={(e) => (e.currentTarget.style.color = "var(--color-text-muted)")}
-          >
-            <ArrowLeft className="w-4 h-4" />
-            Back to Outsoor
-          </Link>
-        </div>
-      </div>
+      <PageTopBar breadcrumb="Demo · Request a Demo" />
+
 
       <div ref={ref} className="max-w-7xl mx-auto px-6">
 
