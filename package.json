@@ -81,5 +81,23 @@
     "postcss": "^8.5",
     "tailwindcss": "^3.4.17",
     "typescript": "^5"
+  },
+  "roles": {
+    "Admin": {
+      "permissions": ["manage_users", "view_reports", "edit_settings"],
+      "description": "Has full access to all features and settings."
+    },
+    "User": {
+      "permissions": ["view_content", "comment", "create_posts"],
+      "description": "Can view and interact with content but has limited access to settings."
+    },
+    "Enterprise Owner": {
+      "permissions": ["manage_team", "view_reports", "edit_settings"],
+      "description": "Has access to manage the enterprise account and team members."
+    },
+    "Team Member": {
+      "permissions": ["view_content", "create_posts"],
+      "description": "Can contribute content but has no access to management features."
+    }
   }
 }
