@@ -31,7 +31,6 @@ interface SettingsMainProps {
 export function SettingsMain({ user }: SettingsMainProps) {
   const [profileData, setProfileData] = useState({
     name: user.user_metadata?.name || user.name || '',
-    email: user.email || '',
     bio: '',
     location: ''
   })
@@ -62,7 +61,6 @@ export function SettingsMain({ user }: SettingsMainProps) {
     try {
       const formData = new FormData()
       formData.append('name', profileData.name)
-      formData.append('email', profileData.email)
 
       const result = await updateUserProfile(formData)
 
@@ -206,13 +204,9 @@ export function SettingsMain({ user }: SettingsMainProps) {
                     </div>
                     <div className="space-y-2">
                       <label className="text-sm font-medium text-white">Email</label>
-                      <Input
-                        value={profileData.email}
-                        onChange={(e) => setProfileData({...profileData, email: e.target.value})}
-                        className="bg-[#2D2D32] border-[#3D3D42] text-white placeholder-[#8C8C96]"
-                        placeholder="Enter your email"
-                        type="email"
-                      />
+                      <div className="h-10 px-3 rounded-md bg-[#2D2D32] border border-[#3D3D42] text-[#A0A0A8] flex items-center">
+                        {user.email}
+                      </div>
                     </div>
                     <div className="space-y-2">
                       <label className="text-sm font-medium text-white">Bio</label>

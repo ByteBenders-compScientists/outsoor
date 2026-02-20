@@ -13,18 +13,8 @@ export async function updateUserProfile(formData: FormData) {
 
   try {
     const name = formData.get("name") as string
-    const email = formData.get("email") as string
 
     const updates: any = {}
-
-    // Update email if changed
-    if (email && email !== user.email) {
-      const { error: emailError } = await supabase.auth.updateUser({ email })
-      if (emailError) {
-        return { success: false, error: `Email update failed: ${emailError.message}` }
-      }
-      updates.email = email
-    }
 
     // Update name in user metadata
     if (name !== (user.user_metadata?.name || "")) {
