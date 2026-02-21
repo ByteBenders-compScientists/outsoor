@@ -4,26 +4,9 @@ import { motion, useInView } from "framer-motion"
 import { useRef, useState } from "react"
 import Link from "next/link"
 import { useTheme } from "@/contexts/themeContext"
-import { Check, Zap, Building2, Rocket } from "lucide-react"
+import { Check, Zap, Building2 } from "lucide-react"
 
 const plans = [
-  {
-    key: "starter",
-    icon: Rocket,
-    label: "Starter",
-    price: "Free",
-    sub: "10,000 calls to get started",
-    features: [
-      "10,000 API calls included",
-      "Access to 20+ models",
-      "Community support",
-      "Real-time analytics",
-      "Global infrastructure",
-    ],
-    cta: "Start Free",
-    href: "/signup",
-    accent: "var(--color-success)",
-  },
   {
     key: "usage",
     icon: Zap,
@@ -271,7 +254,7 @@ export function PricingSection() {
         </div>
 
         {/* Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-px"
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-px"
           style={{ background: "var(--color-border)" }}
         >
           {plans.map((plan, i) => (
