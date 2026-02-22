@@ -50,29 +50,84 @@ interface AdminSuspendResult {
   error?: string
 }
 
+async function listAllAuthUsers(supabase: Awaited<ReturnType<typeof createAdminClient>>) {
+  const users = [] as Array<{
+    id: string
+    email?: string | null
+    created_at: string
+    last_sign_in_at?: string | null
+    banned_until?: string | null
+    user_metadata?: Record<string, unknown>
+  }>
+
+  const perPage = 1000
+  let page = 1
+
+  while (true) {
+    const { data, error } = await supabase.auth.admin.listUsers({ page, perPage })
+    if (error) {
+      throw error
+    }
+
+    const batch = data?.users || []
+    users.push(...batch)
+
+    if (batch.length < perPage) {
+      break
+    }
+
+    page += 1
+  }
+
+  return users
+}
+
 // Get admin stats - fetches real data from Supabase
 export async function getAdminStats(): Promise<AdminStats> {
   await requireAdmin()
 
   try {
     const supabase = await createAdminClient()
-    
-    // Get total users count using Supabase Admin API
-    const { data: { users }, error } = await supabase.auth.admin.listUsers()
-    
-    if (error) {
-      console.error("Error fetching users for stats:", error)
-      return {
-        totalUsers: 0,
-        totalRevenue: 0,
-        totalUsageCost: 0,
-      }
+
+    const [users, txResult, usageResult] = await Promise.all([
+      listAllAuthUsers(supabase),
+      supabase
+        .from("credit_transactions")
+        .select("type, amount")
+        .eq("status", "completed"),
+      supabase
+        .from("usage_logs")
+        .select("cost"),
+    ])
+
+    if (txResult.error) {
+      console.error("Error fetching transaction stats:", txResult.error)
     }
 
+    if (usageResult.error) {
+      console.error("Error fetching usage stats:", usageResult.error)
+    }
+
+    const completedTransactions = txResult.data || []
+    const totalRevenue = completedTransactions
+      .filter((tx) => tx.type === "topup")
+      .reduce((sum, tx) => sum + Number.parseFloat(String(tx.amount ?? 0)), 0)
+
+    const usageFromLogs = (usageResult.data || []).reduce(
+      (sum, log) => sum + Number.parseFloat(String(log.cost ?? 0)),
+      0
+    )
+
+    const usageFromTransactions = completedTransactions
+      .filter((tx) => tx.type === "usage")
+      .reduce((sum, tx) => sum + Number.parseFloat(String(tx.amount ?? 0)), 0)
+
+    const totalUsageCost = usageFromLogs > 0 ? usageFromLogs : usageFromTransactions
+
     return {
-      totalUsers: users?.length || 0,
-      totalRevenue: 0, // TODO: Implement when transactions table is ready
-      totalUsageCost: 0, // TODO: Implement when transactions table is ready
+      totalUsers: users.length,
+      totalRevenue,
+      totalUsageCost,
     }
   } catch (error) {
     console.error("Error in getAdminStats:", error)
@@ -90,14 +145,8 @@ export async function getUsers(): Promise<AdminUser[]> {
 
   try {
     const supabase = await createAdminClient()
-    
-    // Fetch all users from Supabase Auth using Admin API
-    const { data: { users }, error } = await supabase.auth.admin.listUsers()
-    
-    if (error) {
-      console.error("Error fetching users:", error)
-      return []
-    }
+
+    const users = await listAllAuthUsers(supabase)
 
     const userIds = users.map((user) => user.id)
     const { data: creditsData } = userIds.length
@@ -121,11 +170,18 @@ export async function getUsers(): Promise<AdminUser[]> {
       const isSuspended = suspendedUntilTime !== null && Number.isFinite(suspendedUntilTime) && suspendedUntilTime > Date.now()
       const userIsAdmin = await isAdmin(supabase, user.id)
       const balance = balanceByUserId.get(user.id)
+      const metadataName = user.user_metadata?.name
+      const metadataFullName = user.user_metadata?.full_name
+      const name = typeof metadataName === "string"
+        ? metadataName
+        : typeof metadataFullName === "string"
+          ? metadataFullName
+          : null
 
       return {
         id: user.id,
         email: user.email || 'No email',
-        name: user.user_metadata?.name || user.user_metadata?.full_name || null,
+        name,
         role: userIsAdmin ? 'admin' : 'user',
         created_at: user.created_at,
         balance: Number.isFinite(balance ?? NaN) ? (balance as number) : 0,
@@ -365,8 +421,7 @@ export async function getTransactions(): Promise<AdminTransaction[]> {
 
     const profileNameById = new Map((profilesData || []).map((profile) => [profile.id, profile.name]))
 
-    const { data: authUsersData } = await supabase.auth.admin.listUsers()
-    const authUsers = authUsersData?.users || []
+    const authUsers = await listAllAuthUsers(supabase)
     const emailById = new Map(authUsers.map((user) => [user.id, user.email || "Unknown email"]))
     const authNameById = new Map(
       authUsers.map((user) => [
