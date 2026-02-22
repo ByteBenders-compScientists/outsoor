@@ -6,7 +6,7 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 -- Sessions
 CREATE TABLE IF NOT EXISTS sessions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   token VARCHAR(255) UNIQUE NOT NULL,
   expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
@@ -17,7 +17,7 @@ ALTER TABLE sessions ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZON
 -- API tokens
 CREATE TABLE IF NOT EXISTS api_tokens (
   id SERIAL PRIMARY KEY,
-  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   name VARCHAR(255) NOT NULL DEFAULT 'Default API token',
   token_hash VARCHAR(255) NOT NULL UNIQUE,
   token_prefix VARCHAR(16) NOT NULL,
@@ -49,14 +49,14 @@ BEGIN
   ) THEN
     ALTER TABLE api_tokens DROP CONSTRAINT IF EXISTS api_tokens_user_id_fkey;
     ALTER TABLE api_tokens ALTER COLUMN user_id TYPE UUID USING user_id::text::uuid;
-    ALTER TABLE api_tokens ADD CONSTRAINT api_tokens_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+    ALTER TABLE api_tokens ADD CONSTRAINT api_tokens_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE;
   END IF;
 END $$;
 
 -- User integrations
 CREATE TABLE IF NOT EXISTS user_integrations (
   id SERIAL PRIMARY KEY,
-  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   integration_type VARCHAR(100) NOT NULL,
   integration_name VARCHAR(255) NOT NULL,
   external_account_id VARCHAR(255),
@@ -90,14 +90,14 @@ BEGIN
   ) THEN
     ALTER TABLE user_integrations DROP CONSTRAINT IF EXISTS user_integrations_user_id_fkey;
     ALTER TABLE user_integrations ALTER COLUMN user_id TYPE UUID USING user_id::text::uuid;
-    ALTER TABLE user_integrations ADD CONSTRAINT user_integrations_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+    ALTER TABLE user_integrations ADD CONSTRAINT user_integrations_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE;
   END IF;
 END $$;
 
 -- Password reset tokens
 CREATE TABLE IF NOT EXISTS password_reset_tokens (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   token VARCHAR(255) NOT NULL UNIQUE,
   expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
   used_at TIMESTAMP WITH TIME ZONE,
@@ -112,7 +112,7 @@ ALTER TABLE password_reset_tokens ADD COLUMN IF NOT EXISTS created_at TIMESTAMP 
 -- Credits balance
 CREATE TABLE IF NOT EXISTS user_credits (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   balance DECIMAL(10,2) NOT NULL DEFAULT 0.00,
   total_spent DECIMAL(10,2) NOT NULL DEFAULT 0.00,
   total_topped_up DECIMAL(10,2) NOT NULL DEFAULT 0.00,
@@ -130,7 +130,7 @@ ALTER TABLE user_credits ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME
 -- Credit transactions
 CREATE TABLE IF NOT EXISTS credit_transactions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   type VARCHAR(20) NOT NULL CHECK (type IN ('topup', 'usage', 'refund')),
   amount DECIMAL(10,2) NOT NULL,
   description TEXT,
@@ -151,7 +151,7 @@ ALTER TABLE credit_transactions ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WI
 -- Usage logs
 CREATE TABLE IF NOT EXISTS usage_logs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   service_type VARCHAR(50) NOT NULL,
   tokens_used INTEGER,
   cost DECIMAL(8,4) NOT NULL,
@@ -254,6 +254,70 @@ CREATE TRIGGER trigger_update_credits_balance
   AFTER INSERT ON credit_transactions
   FOR EACH ROW
   EXECUTE FUNCTION update_user_credits_balance();
+
+-- Admin policy helper
+CREATE OR REPLACE FUNCTION public.is_admin()
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  RETURN EXISTS (
+    SELECT 1
+    FROM public.profiles
+    WHERE id = auth.uid()
+      AND is_admin = TRUE
+  );
+END;
+$$;
+
+ALTER TABLE public.user_credits ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.credit_transactions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.usage_logs ENABLE ROW LEVEL SECURITY;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public'
+      AND tablename = 'user_credits'
+      AND policyname = 'admin_manage_user_credits'
+  ) THEN
+    CREATE POLICY admin_manage_user_credits
+      ON public.user_credits
+      FOR ALL
+      USING (public.is_admin())
+      WITH CHECK (public.is_admin());
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public'
+      AND tablename = 'credit_transactions'
+      AND policyname = 'admin_manage_credit_transactions'
+  ) THEN
+    CREATE POLICY admin_manage_credit_transactions
+      ON public.credit_transactions
+      FOR ALL
+      USING (public.is_admin())
+      WITH CHECK (public.is_admin());
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public'
+      AND tablename = 'usage_logs'
+      AND policyname = 'admin_manage_usage_logs'
+  ) THEN
+    CREATE POLICY admin_manage_usage_logs
+      ON public.usage_logs
+      FOR ALL
+      USING (public.is_admin())
+      WITH CHECK (public.is_admin());
+  END IF;
+END;
+$$;
 
 -- Initialize user credits on signup
 CREATE OR REPLACE FUNCTION public.handle_new_user_credits()

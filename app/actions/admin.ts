@@ -99,12 +99,28 @@ export async function getUsers(): Promise<AdminUser[]> {
       return []
     }
 
+    const userIds = users.map((user) => user.id)
+    const { data: creditsData } = userIds.length
+      ? await supabase
+          .from("user_credits")
+          .select("user_id, balance")
+          .in("user_id", userIds)
+      : { data: [] }
+
+    const balanceByUserId = new Map(
+      (creditsData || []).map((credit) => [
+        credit.user_id,
+        Number.parseFloat(String(credit.balance ?? 0)),
+      ])
+    )
+
     // Transform Supabase users to AdminUser format
     const adminUsers: AdminUser[] = await Promise.all(users.map(async (user) => {
       const suspendedUntil = user.banned_until || null
       const suspendedUntilTime = suspendedUntil ? new Date(suspendedUntil).getTime() : null
       const isSuspended = suspendedUntilTime !== null && Number.isFinite(suspendedUntilTime) && suspendedUntilTime > Date.now()
       const userIsAdmin = await isAdmin(supabase, user.id)
+      const balance = balanceByUserId.get(user.id)
 
       return {
         id: user.id,
@@ -112,7 +128,7 @@ export async function getUsers(): Promise<AdminUser[]> {
         name: user.user_metadata?.name || user.user_metadata?.full_name || null,
         role: userIsAdmin ? 'admin' : 'user',
         created_at: user.created_at,
-        balance: 0, // TODO: Fetch from user_credits table when implemented
+        balance: Number.isFinite(balance ?? NaN) ? (balance as number) : 0,
         last_sign_in_at: user.last_sign_in_at || null,
         is_suspended: isSuspended,
         suspended_until: suspendedUntil,
@@ -131,10 +147,12 @@ export async function getUsers(): Promise<AdminUser[]> {
 
 // Admin manual top-up for a specific user
 export async function adminTopUpUserAction(formData: FormData): Promise<AdminTopUpResult> {
-  await requireAdmin()
+  const currentAdmin = await requireAdmin()
+  const supabase = await createAdminClient()
 
   const userId = formData.get("userId") as string | null
   const amountStr = formData.get("amount") as string | null
+  const description = (formData.get("description") as string | null)?.trim() || null
 
   if (!userId) {
     return { success: false, error: "Missing user ID" }
@@ -146,16 +164,42 @@ export async function adminTopUpUserAction(formData: FormData): Promise<AdminTop
     return { success: false, error: "Amount must be greater than 0" }
   }
 
-  // Return success
+  const { error: ensureCreditsError } = await supabase
+    .from("user_credits")
+    .upsert({ user_id: userId }, { onConflict: "user_id", ignoreDuplicates: true })
+
+  if (ensureCreditsError) {
+    console.error("Error initializing user credits:", ensureCreditsError)
+    return { success: false, error: "Failed to initialize user credits" }
+  }
+
+  const { error: insertError } = await supabase
+    .from("credit_transactions")
+    .insert({
+      user_id: userId,
+      type: "topup",
+      amount,
+      description,
+      status: "completed",
+      metadata: { source: "admin", admin_id: currentAdmin.id },
+    })
+
+  if (insertError) {
+    console.error("Error adding credits:", insertError)
+    return { success: false, error: "Failed to add credits" }
+  }
+
   return { success: true, message: `Successfully added $${amount.toFixed(2)} to user account` }
 }
 
 // Admin manual deduction
 export async function adminDeductUserCreditsAction(formData: FormData): Promise<AdminTopUpResult> {
-  await requireAdmin()
+  const currentAdmin = await requireAdmin()
+  const supabase = await createAdminClient()
 
   const userId = formData.get("userId") as string | null
   const amountStr = formData.get("amount") as string | null
+  const description = (formData.get("description") as string | null)?.trim() || null
 
   if (!userId) {
     return { success: false, error: "Missing user ID" }
@@ -167,7 +211,47 @@ export async function adminDeductUserCreditsAction(formData: FormData): Promise<
     return { success: false, error: "Amount must be greater than 0" }
   }
 
-  // Return success
+  const { error: ensureCreditsError } = await supabase
+    .from("user_credits")
+    .upsert({ user_id: userId }, { onConflict: "user_id", ignoreDuplicates: true })
+
+  if (ensureCreditsError) {
+    console.error("Error initializing user credits:", ensureCreditsError)
+    return { success: false, error: "Failed to initialize user credits" }
+  }
+
+  const { data: creditRow, error: creditFetchError } = await supabase
+    .from("user_credits")
+    .select("balance")
+    .eq("user_id", userId)
+    .single()
+
+  if (creditFetchError) {
+    console.error("Error fetching current balance:", creditFetchError)
+    return { success: false, error: "Failed to fetch current balance" }
+  }
+
+  const currentBalance = Number.parseFloat(String(creditRow?.balance ?? 0))
+  if (!Number.isFinite(currentBalance) || currentBalance < amount) {
+    return { success: false, error: "Insufficient balance to deduct that amount" }
+  }
+
+  const { error: insertError } = await supabase
+    .from("credit_transactions")
+    .insert({
+      user_id: userId,
+      type: "usage",
+      amount,
+      description,
+      status: "completed",
+      metadata: { source: "admin", admin_id: currentAdmin.id },
+    })
+
+  if (insertError) {
+    console.error("Error deducting credits:", insertError)
+    return { success: false, error: "Failed to deduct credits" }
+  }
+
   return { success: true, message: `Successfully deducted $${amount.toFixed(2)} from user account` }
 }
 
