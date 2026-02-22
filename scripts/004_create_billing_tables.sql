@@ -72,6 +72,70 @@ CREATE TRIGGER trigger_update_credits_balance
     WHEN (NEW.status = 'completed')
     EXECUTE FUNCTION public.update_user_credits_balance();
 
+-- Admin policy helper
+CREATE OR REPLACE FUNCTION public.is_admin()
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+    RETURN EXISTS (
+        SELECT 1
+        FROM public.profiles
+        WHERE id = auth.uid()
+          AND is_admin = TRUE
+    );
+END;
+$$;
+
+ALTER TABLE public.user_credits ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.credit_transactions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.usage_logs ENABLE ROW LEVEL SECURITY;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_policies
+        WHERE schemaname = 'public'
+          AND tablename = 'user_credits'
+          AND policyname = 'admin_manage_user_credits'
+    ) THEN
+        CREATE POLICY admin_manage_user_credits
+            ON public.user_credits
+            FOR ALL
+            USING (public.is_admin())
+            WITH CHECK (public.is_admin());
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_policies
+        WHERE schemaname = 'public'
+          AND tablename = 'credit_transactions'
+          AND policyname = 'admin_manage_credit_transactions'
+    ) THEN
+        CREATE POLICY admin_manage_credit_transactions
+            ON public.credit_transactions
+            FOR ALL
+            USING (public.is_admin())
+            WITH CHECK (public.is_admin());
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_policies
+        WHERE schemaname = 'public'
+          AND tablename = 'usage_logs'
+          AND policyname = 'admin_manage_usage_logs'
+    ) THEN
+        CREATE POLICY admin_manage_usage_logs
+            ON public.usage_logs
+            FOR ALL
+            USING (public.is_admin())
+            WITH CHECK (public.is_admin());
+    END IF;
+END;
+$$;
+
 -- Initialize user credits on signup
 CREATE OR REPLACE FUNCTION public.handle_new_user_credits()
 RETURNS TRIGGER
